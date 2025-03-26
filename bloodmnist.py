@@ -12,3 +12,6 @@ iugiubiiuggfizjfgh
 
 def test_function():
     print("Hallo")
+
+def new_function():
+    print("New Function")
