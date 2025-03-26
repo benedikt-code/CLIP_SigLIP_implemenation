@@ -9,3 +9,6 @@ import numpy as np
 
 
 iugiubiiuggfizjfgh
+
+def test_function():
+    print("Hallo")
