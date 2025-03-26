@@ -15,3 +15,4 @@ def test_function():
 
 def new_function():
     print("New Function")
+    print("extension")
