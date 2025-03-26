@@ -16,8 +16,9 @@ data_transforms = transforms.Compose([
 ])
 
 # Training & Testdaten laden
-train_dataset = BloodMNIST(split='train', transform=data_transforms, download=download)
-test_dataset = BloodMNIST(split='test', transform=data_transforms, download=download)
+
+train_dataset = BloodMNIST(split='train', download=True, root='./data')
+test_dataset = BloodMNIST(split='test', download=True, root='./data')
 
 # DataLoader zum Durchlaufen
 train_loader = DataLoader(dataset=train_dataset, batch_size=64, shuffle=True)
