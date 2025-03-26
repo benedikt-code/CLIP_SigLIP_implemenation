@@ -1,25 +1,24 @@
-#First Comment
-
 import medmnist
-from medmnist import BloodMNIST
-import torch
-import matplotlib.pyplot as plt
-import numpy as np
+from medmnist import INFO, BloodMNIST
+from torchvision import transforms
+from torch.utils.data import DataLoader
 
+# Lade Dataset-Infos
+data_flag = 'bloodmnist'
+download = True
 
+# Optional: Infos anzeigen
+print(INFO[data_flag])
 
-iugiubiiuggfizjfgh
+# Transformation definieren (z. B. Tensor-Konvertierung)
+data_transforms = transforms.Compose([
+    transforms.ToTensor()
+])
 
-def test_function():
-    print("Hallo")
+# Training & Testdaten laden
+train_dataset = BloodMNIST(split='train', transform=data_transforms, download=download)
+test_dataset = BloodMNIST(split='test', transform=data_transforms, download=download)
 
-def load_data():
-    print("Loading data")
-
-
-
-def main():
-    print("Hello World")
-def new_function():
-    print("New Function")
-    print("extension")
+# DataLoader zum Durchlaufen
+train_loader = DataLoader(dataset=train_dataset, batch_size=64, shuffle=True)
+test_loader = DataLoader(dataset=test_dataset, batch_size=64, shuffle=False)
