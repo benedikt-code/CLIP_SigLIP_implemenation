@@ -12,3 +12,6 @@ iugiubiiuggfizjfgh
 
 def test_function():
     print("Hallo")
+
+def load_data():
+    print("Loading data")
