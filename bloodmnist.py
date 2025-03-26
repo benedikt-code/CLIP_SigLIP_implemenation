@@ -20,3 +20,6 @@ def load_data():
 
 def main():
     print("Hello World")
+def new_function():
+    print("New Function")
+    print("extension")
