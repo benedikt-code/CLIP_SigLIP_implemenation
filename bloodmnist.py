@@ -15,3 +15,8 @@ def test_function():
 
 def load_data():
     print("Loading data")
+
+
+
+def main():
+    print("Hello World")
