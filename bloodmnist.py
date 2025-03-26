@@ -1,25 +1,18 @@
-import medmnist
-from medmnist import INFO, BloodMNIST
+from medmnist import BloodMNIST
 from torchvision import transforms
 from torch.utils.data import DataLoader
 
-# Lade Dataset-Infos
-data_flag = 'bloodmnist'
-download = True
+# Custom root directory for the dataset
+data_root = './data'
 
-# Optional: Infos anzeigen
-print(INFO[data_flag])
-
-# Transformation definieren (z. B. Tensor-Konvertierung)
+# Transformation (convert images to tensor)
 data_transforms = transforms.Compose([
     transforms.ToTensor()
 ])
 
-# Training & Testdaten laden
+# Load train & test splits from local file
+train_dataset = BloodMNIST(split='train', transform=data_transforms, download=False, root=data_root)
+test_dataset = BloodMNIST(split='test', transform=data_transforms, download=False, root=data_root)
 
-train_dataset = BloodMNIST(split='train', download=True, root='./data')
-test_dataset = BloodMNIST(split='test', download=True, root='./data')
-
-# DataLoader zum Durchlaufen
-train_loader = DataLoader(dataset=train_dataset, batch_size=64, shuffle=True)
-test_loader = DataLoader(dataset=test_dataset, batch_size=64, shuffle=False)
+# Optional: Wrap in DataLoader
+train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)

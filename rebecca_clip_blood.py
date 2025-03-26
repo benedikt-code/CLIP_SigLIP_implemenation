@@ -1,3 +1,4 @@
+import os
 import medmnist
 from medmnist import BloodMNIST, INFO, Evaluator
 import matplotlib.pyplot as plt
@@ -10,8 +11,10 @@ import torch.optim as optim
 import torch.utils.data as data
 
 
-data_flag = 'pathmnist'
-download = True
+data_flag = 'bloodmnist'
+data_root = './data'
+#Wenn Datensatz noch nicht da, dann True machen und oben halt datensatz name ändern
+download = False
 
 NUM_EPOCHS = 3
 BATCH_SIZE = 128
@@ -33,8 +36,8 @@ data_transform = transforms.Compose([
 ])
 
 # load the data
-train_dataset = DataClass(split='train', transform=data_transform, download=download)
-test_dataset = DataClass(split='test', transform=data_transform, download=download)
+train_dataset = DataClass(split='train', transform=data_transform, download=download, root=data_root)
+test_dataset = DataClass(split='test', transform=data_transform, download=download, root=data_root)
 
 pil_dataset = DataClass(split='train', download=download)
 
