@@ -46,7 +46,7 @@ def evaluate(model, clip_preprocess, npz_path, split, device):
     all_labels = []
 
     with torch.no_grad():
-        for i in range(0, len(images), 64):  # batch size 64
+        for i in range(0, len(images), 64):
             batch_imgs = []
             batch_labels = []
 
@@ -57,15 +57,13 @@ def evaluate(model, clip_preprocess, npz_path, split, device):
                 batch_labels.append(labels[j])
 
             batch_tensor = torch.stack(batch_imgs).to(device, non_blocking=True)
-            batch_embeddings = encode_fn(batch_tensor)  # shape: (B, D)
+            batch_embeddings = encode_fn(batch_tensor)
             all_embeddings.append(batch_embeddings)
             all_labels.extend(batch_labels)
 
-    # Stack everything ONCE
     all_embeddings = torch.cat(all_embeddings, dim=0).cpu().numpy()
     all_labels = np.array(all_labels)
 
-    # Compute class prototypes
     class_means = []
     for class_idx in np.unique(all_labels):
         class_mean = all_embeddings[all_labels == class_idx].mean(axis=0)
@@ -125,6 +123,8 @@ def train_clip_encoder_on_pairs():
     optimizer = optim.Adam(model.parameters(), lr=1e-5)
     model.train()
 
+    best_val_auc = 0.0
+
     for epoch in range(1, 11):
         total_loss = 0
         for img1, img2 in tqdm(dataloader, desc=f"Epoch {epoch}"):
@@ -146,7 +146,6 @@ def train_clip_encoder_on_pairs():
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch {epoch} finished. Avg Loss: {avg_loss:.4f}")
 
-        # Evaluation after each epoch
         with torch.no_grad():
             train_acc, train_auc = evaluate(model, clip_preprocess, "./data/bloodmnist.npz", split="train", device=device)
             val_acc, val_auc = evaluate(model, clip_preprocess, "./data/bloodmnist.npz", split="val", device=device)
@@ -156,6 +155,13 @@ def train_clip_encoder_on_pairs():
         print(f"Train  Accuracy: {train_acc:.4f} | AUC: {train_auc:.4f}")
         print(f"Val    Accuracy: {val_acc:.4f} | AUC: {val_auc:.4f}")
         print(f"Test   Accuracy: {test_acc:.4f} | AUC: {test_auc:.4f}\n")
+
+        # Save best model
+        if val_auc > best_val_auc:
+            best_val_auc = val_auc
+            model_to_save = model.module if isinstance(model, torch.nn.DataParallel) else model
+            torch.save(model_to_save.state_dict(), f"clip_model_best.pth")
+            print("💾 Saved new best model!")
 
         model.train()
 
