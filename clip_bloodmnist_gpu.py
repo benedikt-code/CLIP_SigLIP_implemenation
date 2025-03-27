@@ -126,7 +126,7 @@ def train_clip_dual_encoder():
     )
 
     optimizer = optim.Adam(list(encoder_1.parameters()) + list(encoder_2.parameters()), lr=1e-5)
-    scaler = GradScaler()
+    scaler = GradScaler(device_type='cuda')
 
     for epoch in range(1, 11):
         encoder_1.train()
@@ -138,7 +138,7 @@ def train_clip_dual_encoder():
             img2 = img2.to(device, non_blocking=True)
 
             optimizer.zero_grad()
-            with autocast():
+            with autocast(device_type='cuda'):
                 feat1 = encoder_1(img1)
                 feat2 = encoder_2(img2)
 
