@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 import os
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 from sklearn.metrics import accuracy_score, roc_auc_score
 
 class BloodMNISTImagePairDataset(Dataset):
@@ -41,7 +41,7 @@ def evaluate(model, npz_path, split, clip_preprocess, device):
     labels = data[f"{split}_labels"].squeeze()
 
     model.eval()
-    encode_fn = model.module.encode_image if isinstance(model, torch.nn.DataParallel) else model.encode_image
+    encode_fn = model
 
     all_embeddings = []
     all_labels = []
@@ -126,7 +126,7 @@ def train_clip_dual_encoder():
     )
 
     optimizer = optim.Adam(list(encoder_1.parameters()) + list(encoder_2.parameters()), lr=1e-5)
-    scaler = GradScaler()
+    scaler = GradScaler(device_type='cuda')
 
     for epoch in range(1, 11):
         encoder_1.train()
@@ -138,7 +138,7 @@ def train_clip_dual_encoder():
             img2 = img2.to(device, non_blocking=True)
 
             optimizer.zero_grad()
-            with autocast():
+            with autocast(device_type='cuda'):
                 feat1 = encoder_1(img1)
                 feat2 = encoder_2(img2)
 
