@@ -29,7 +29,7 @@ def create_image_pair(image_path):
 
 # Load the dataset
 data = np.load("./data/bloodmnist.npz")
-images = data["images"]
+images = data["train_images"]
 
 # Convert a single image to PIL and apply transformation
 def process_image(image_array):
