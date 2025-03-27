@@ -95,14 +95,13 @@ def train_clip_encoder_on_pairs():
         transform=custom_transform,
         clip_preprocess=clip_preprocess
     )
-    num_workers = min(os.cpu_count(), 16)
-    print("Workers: " + str(num_workers))
-    dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=num_workers, prefetch_factor=2)
+    
+    dataloader = DataLoader(dataset, batch_size=64, shuffle=True, num_workers=8, prefetch_factor=2, persistent_workers=True)
 
     optimizer = optim.Adam(model.parameters(), lr=1e-5)
     model.train()
 
-    for epoch in range(1, 3):
+    for epoch in range(1, 11):
         total_loss = 0
         for img1, img2 in tqdm(dataloader, desc=f"Epoch {epoch}"):
             img1, img2 = img1.to(device), img2.to(device)
