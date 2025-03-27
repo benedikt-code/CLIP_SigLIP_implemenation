@@ -7,15 +7,15 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score, roc_auc_score
 import os
 from torch.cuda.amp import autocast, GradScaler
+from sklearn.metrics import accuracy_score, roc_auc_score
 
-# Dataset class for original + augmented image pairs
 class BloodMNISTImagePairDataset(Dataset):
     def __init__(self, npz_path, split='train', transform=None, clip_preprocess=None):
         data = np.load(npz_path)
         self.images = data[f"{split}_images"]
+        self.labels = data[f"{split}_labels"].squeeze()
         self.transform = transform
         self.clip_preprocess = clip_preprocess
 
@@ -28,10 +28,14 @@ class BloodMNISTImagePairDataset(Dataset):
         augmented = self.transform(img) if self.transform else img
         img1 = self.clip_preprocess(img)
         img2 = self.clip_preprocess(augmented)
-        return img1, img2
+        return img1, img2, self.labels[idx]
 
-# Evaluation function using class means + cosine similarity
-def evaluate(model, clip_preprocess, npz_path, split, device):
+def info_nce_loss(logits):
+    batch_size = logits.shape[0]
+    labels = torch.arange(batch_size, device=logits.device)
+    return F.cross_entropy(logits, labels)
+
+def evaluate(model, npz_path, split, clip_preprocess, device):
     data = np.load(npz_path)
     images = data[f"{split}_images"]
     labels = data[f"{split}_labels"].squeeze()
@@ -46,14 +50,13 @@ def evaluate(model, clip_preprocess, npz_path, split, device):
         for i in range(0, len(images), 64):
             batch_imgs = []
             batch_labels = []
-
             for j in range(i, min(i + 64, len(images))):
                 img = Image.fromarray((images[j] * 255).astype(np.uint8)).convert("RGB")
                 tensor = clip_preprocess(img)
                 batch_imgs.append(tensor)
                 batch_labels.append(labels[j])
 
-            batch_tensor = torch.stack(batch_imgs).to(device, non_blocking=True)
+            batch_tensor = torch.stack(batch_imgs).to(device)
             batch_embeddings = encode_fn(batch_tensor)
             all_embeddings.append(batch_embeddings)
             all_labels.extend(batch_labels)
@@ -81,22 +84,26 @@ def evaluate(model, clip_preprocess, npz_path, split, device):
 
     return acc, auc
 
-# Main training function
-def train_clip_encoder_on_pairs():
+def train_clip_dual_encoder():
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"✅ Using device: {device} | GPU count: {torch.cuda.device_count()}")
 
-    model, clip_preprocess = clip.load("ViT-B/32", device=device, jit=False, download_root="./clip_model_cache")
-    model = model.float()
+    base_model, clip_preprocess = clip.load("ViT-B/32", device=device, jit=False, download_root="./clip_model_cache")
+    encoder_1 = base_model.visual
+    encoder_2 = clip.load("ViT-B/32", device=device, jit=False, download_root="./clip_model_cache")[0].visual
+
+    encoder_1 = encoder_1.float()
+    encoder_2 = encoder_2.float()
 
     if torch.cuda.device_count() > 1:
-        print(f"🚀 Using {torch.cuda.device_count()} GPUs via DataParallel")
-        model = torch.nn.DataParallel(model)
+        encoder_1 = torch.nn.DataParallel(encoder_1)
+        encoder_2 = torch.nn.DataParallel(encoder_2)
 
-    model = model.to(device)
+    encoder_1 = encoder_1.to(device)
+    encoder_2 = encoder_2.to(device)
 
-    custom_transform = transforms.Compose([
+    transform = transforms.Compose([
         transforms.RandomHorizontalFlip(),
         transforms.RandomRotation(30),
     ])
@@ -104,13 +111,13 @@ def train_clip_encoder_on_pairs():
     dataset = BloodMNISTImagePairDataset(
         npz_path="./data/bloodmnist.npz",
         split="train",
-        transform=custom_transform,
+        transform=transform,
         clip_preprocess=clip_preprocess
     )
 
     dataloader = DataLoader(
         dataset,
-        batch_size=64,
+        batch_size=128,
         shuffle=True,
         num_workers=8,
         prefetch_factor=2,
@@ -118,24 +125,28 @@ def train_clip_encoder_on_pairs():
         pin_memory=True
     )
 
-    optimizer = optim.Adam(model.parameters(), lr=1e-5)
+    optimizer = optim.Adam(list(encoder_1.parameters()) + list(encoder_2.parameters()), lr=1e-5)
     scaler = GradScaler()
-    model.train()
-
-    best_val_auc = 0.0
 
     for epoch in range(1, 11):
+        encoder_1.train()
+        encoder_2.train()
         total_loss = 0
-        for img1, img2 in tqdm(dataloader, desc=f"Epoch {epoch}"):
+
+        for img1, img2, _ in tqdm(dataloader, desc=f"Epoch {epoch}"):
             img1 = img1.to(device, non_blocking=True)
             img2 = img2.to(device, non_blocking=True)
 
             optimizer.zero_grad()
             with autocast():
-                f1 = model.module.encode_image(img1) if isinstance(model, torch.nn.DataParallel) else model.encode_image(img1)
-                f2 = model.module.encode_image(img2) if isinstance(model, torch.nn.DataParallel) else model.encode_image(img2)
-                similarity = F.cosine_similarity(f1, f2, dim=-1)
-                loss = -similarity.mean()
+                feat1 = encoder_1(img1)
+                feat2 = encoder_2(img2)
+
+                feat1 = F.normalize(feat1, dim=-1)
+                feat2 = F.normalize(feat2, dim=-1)
+
+                logits = feat1 @ feat2.T * 100.0
+                loss = info_nce_loss(logits)
 
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -147,23 +158,22 @@ def train_clip_encoder_on_pairs():
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch {epoch} finished. Avg Loss: {avg_loss:.4f}")
 
-        with torch.no_grad():
-            train_acc, train_auc = evaluate(model, clip_preprocess, "./data/bloodmnist.npz", split="train", device=device)
-            val_acc, val_auc = evaluate(model, clip_preprocess, "./data/bloodmnist.npz", split="val", device=device)
-            test_acc, test_auc = evaluate(model, clip_preprocess, "./data/bloodmnist.npz", split="test", device=device)
+        # Evaluation after epoch
+        eval_model = encoder_1.module if isinstance(encoder_1, torch.nn.DataParallel) else encoder_1
+        acc_train, auc_train = evaluate(eval_model, "./data/bloodmnist.npz", split="train", clip_preprocess=clip_preprocess, device=device)
+        acc_val, auc_val = evaluate(eval_model, "./data/bloodmnist.npz", split="val", clip_preprocess=clip_preprocess, device=device)
+        acc_test, auc_test = evaluate(eval_model, "./data/bloodmnist.npz", split="test", clip_preprocess=clip_preprocess, device=device)
 
         print(f"\n📊 Results after Epoch {epoch}:")
-        print(f"Train  Accuracy: {train_acc:.4f} | AUC: {train_auc:.4f}")
-        print(f"Val    Accuracy: {val_acc:.4f} | AUC: {val_auc:.4f}")
-        print(f"Test   Accuracy: {test_acc:.4f} | AUC: {test_auc:.4f}\n")
+        print(f"Train Accuracy: {acc_train:.4f} | AUC: {auc_train:.4f}")
+        print(f"Val   Accuracy: {acc_val:.4f} | AUC: {auc_val:.4f}")
+        print(f"Test  Accuracy: {acc_test:.4f} | AUC: {auc_test:.4f}\n")
 
-        if val_auc > best_val_auc:
-            best_val_auc = val_auc
-            model_to_save = model.module if isinstance(model, torch.nn.DataParallel) else model
-            torch.save(model_to_save.state_dict(), f"clip_model_best.pth")
-            print("💾 Saved new best model!")
-
-        model.train()
+        torch.save({
+            "encoder_1": encoder_1.module.state_dict() if isinstance(encoder_1, torch.nn.DataParallel) else encoder_1.state_dict(),
+            "encoder_2": encoder_2.module.state_dict() if isinstance(encoder_2, torch.nn.DataParallel) else encoder_2.state_dict()
+        }, f"clip_dual_encoder_epoch{epoch}.pth")
+        print("💾 Saved model checkpoint\n")
 
 if __name__ == "__main__":
-    train_clip_encoder_on_pairs()
+    train_clip_dual_encoder()
