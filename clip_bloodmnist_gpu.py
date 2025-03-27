@@ -113,7 +113,7 @@ def train_clip_encoder_on_pairs():
 
     dataloader = DataLoader(
         dataset,
-        batch_size=128,
+        batch_size=32,
         shuffle=True,
         num_workers=8,
         prefetch_factor=2,
