@@ -89,7 +89,8 @@ def train_clip_encoder_on_pairs():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"✅ Using device: {device} | GPU count: {torch.cuda.device_count()}")
 
-    model, clip_preprocess = clip.load("ViT-B/32", device=device, jit=False)
+    model, clip_preprocess = clip.load("ViT-B/32", device=device, jit=False, download_root="./clip_model_cache")
+
     model = model.float()
 
     if torch.cuda.device_count() > 1:
