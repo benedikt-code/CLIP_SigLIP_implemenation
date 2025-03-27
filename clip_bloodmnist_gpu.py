@@ -9,13 +9,13 @@ import torch.optim as optim
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score, roc_auc_score
 import os
+from torch.cuda.amp import autocast, GradScaler
 
 # Dataset class for original + augmented image pairs
 class BloodMNISTImagePairDataset(Dataset):
     def __init__(self, npz_path, split='train', transform=None, clip_preprocess=None):
         data = np.load(npz_path)
         self.images = data[f"{split}_images"]
-        self.labels = data[f"{split}_labels"].squeeze()
         self.transform = transform
         self.clip_preprocess = clip_preprocess
 
@@ -25,12 +25,9 @@ class BloodMNISTImagePairDataset(Dataset):
     def __getitem__(self, idx):
         img_array = (self.images[idx] * 255).astype(np.uint8)
         img = Image.fromarray(img_array).convert("RGB")
-
         augmented = self.transform(img) if self.transform else img
-
         img1 = self.clip_preprocess(img)
         img2 = self.clip_preprocess(augmented)
-
         return img1, img2
 
 # Evaluation function using class means + cosine similarity
@@ -86,15 +83,15 @@ def evaluate(model, clip_preprocess, npz_path, split, device):
 
 # Main training function
 def train_clip_encoder_on_pairs():
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"✅ Using device: {device} | GPU count: {torch.cuda.device_count()}")
 
     model, clip_preprocess = clip.load("ViT-B/32", device=device, jit=False, download_root="./clip_model_cache")
-
     model = model.float()
 
     if torch.cuda.device_count() > 1:
-        print("🚀 Using DataParallel for multi-GPU training")
+        print(f"🚀 Using {torch.cuda.device_count()} GPUs via DataParallel")
         model = torch.nn.DataParallel(model)
 
     model = model.to(device)
@@ -122,6 +119,7 @@ def train_clip_encoder_on_pairs():
     )
 
     optimizer = optim.Adam(model.parameters(), lr=1e-5)
+    scaler = GradScaler()
     model.train()
 
     best_val_auc = 0.0
@@ -132,17 +130,19 @@ def train_clip_encoder_on_pairs():
             img1 = img1.to(device, non_blocking=True)
             img2 = img2.to(device, non_blocking=True)
 
-            f1 = model.module.encode_image(img1) if isinstance(model, torch.nn.DataParallel) else model.encode_image(img1)
-            f2 = model.module.encode_image(img2) if isinstance(model, torch.nn.DataParallel) else model.encode_image(img2)
-
-            similarity = F.cosine_similarity(f1, f2, dim=-1)
-            loss = -similarity.mean()
-
             optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            with autocast():
+                f1 = model.module.encode_image(img1) if isinstance(model, torch.nn.DataParallel) else model.encode_image(img1)
+                f2 = model.module.encode_image(img2) if isinstance(model, torch.nn.DataParallel) else model.encode_image(img2)
+                similarity = F.cosine_similarity(f1, f2, dim=-1)
+                loss = -similarity.mean()
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             total_loss += loss.item()
+            torch.cuda.empty_cache()
 
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch {epoch} finished. Avg Loss: {avg_loss:.4f}")
@@ -157,7 +157,6 @@ def train_clip_encoder_on_pairs():
         print(f"Val    Accuracy: {val_acc:.4f} | AUC: {val_auc:.4f}")
         print(f"Test   Accuracy: {test_acc:.4f} | AUC: {test_auc:.4f}\n")
 
-        # Save best model
         if val_auc > best_val_auc:
             best_val_auc = val_auc
             model_to_save = model.module if isinstance(model, torch.nn.DataParallel) else model
