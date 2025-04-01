@@ -145,6 +145,7 @@ def train_clip_dual_encoder():
                 feat2 = F.normalize(feat2, dim=-1)
 
                 logits = feat1 @ feat2.T * 100.0
+                #temp nachschauen
                 loss = info_nce_loss(logits)
 
             scaler.scale(loss).backward()
@@ -158,12 +159,13 @@ def train_clip_dual_encoder():
         print(f"Epoch {epoch} finished. Avg Loss: {avg_loss:.4f}")
 
         # Evaluation after epoch
+        #test encoder 2
         eval_model = encoder_1.module if isinstance(encoder_1, torch.nn.DataParallel) else encoder_1
         acc_train, auc_train = evaluate(eval_model, "./data/bloodmnist.npz", split="train", clip_preprocess=clip_preprocess, device=device)
         acc_val, auc_val = evaluate(eval_model, "./data/bloodmnist.npz", split="val", clip_preprocess=clip_preprocess, device=device)
         acc_test, auc_test = evaluate(eval_model, "./data/bloodmnist.npz", split="test", clip_preprocess=clip_preprocess, device=device)
 
-        print(f"\n📊 Results after Epoch {epoch}:")
+        print(f"\n Results after Epoch {epoch}:")
         print(f"Train Accuracy: {acc_train:.4f} | AUC: {auc_train:.4f}")
         print(f"Val   Accuracy: {acc_val:.4f} | AUC: {auc_val:.4f}")
         print(f"Test  Accuracy: {acc_test:.4f} | AUC: {auc_test:.4f}\n")
