@@ -190,7 +190,7 @@ def train_vit_contrastive():
     optimizer = optim.Adam(list(model_1.parameters()) + list(model_2.parameters()), lr=1e-4)
     scaler = GradScaler()
 
-    for epoch in range(1, 6):
+    for epoch in range(1, 16):
         model_1.train()
         model_2.train()
         total_loss = 0
