@@ -1,5 +1,3 @@
-# Vision Transformer (ViT) with contrastive learning on BloodMNIST + Evaluation
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,7 +8,6 @@ from PIL import Image
 import numpy as np
 from tqdm import tqdm
 import math
-import os
 from torch.cuda.amp import autocast
 from sklearn.metrics import accuracy_score, roc_auc_score
 
@@ -27,6 +24,7 @@ class PatchEmbedding(nn.Module):
 
     def forward(self, x):
         print(f"PatchEmbedding input shape: {x.shape}")  # (B, C, H, W)
+
         # Step 1: Split image into patches
         B, C, H, W = x.shape
         assert H % self.patch_size == 0 and W % self.patch_size == 0, \
@@ -88,7 +86,7 @@ class TransformerEncoderBlock(nn.Module):
         return x
 
 class VisionTransformer(nn.Module):
-    def __init__(self, img_size=28, patch_size=7, in_channels=3, embed_dim=128, depth=6, num_heads=8, mlp_dim=256):
+    def __init__(self, img_size=28, patch_size=7, in_channels=3, embed_dim=128, depth=1, num_heads=8, mlp_dim=256):
         super().__init__()
         self.patch_embed = PatchEmbedding(img_size, patch_size, in_channels, embed_dim)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -103,21 +101,26 @@ class VisionTransformer(nn.Module):
         self.norm = nn.LayerNorm(embed_dim)
 
     def forward(self, x):
+        print(f"VisionTransformer input shape: {x.shape}")
         B = x.size(0)
         x = self.patch_embed(x)
         cls_tokens = self.cls_token.expand(B, -1, -1)
+        print(f"CLS token shape: {cls_tokens.shape}")
         x = torch.cat((cls_tokens, x), dim=1)
+        print(f"Shape after concatenating CLS token: {x.shape}")
         x = x + self.pos_embed[:, :x.size(1), :]
+        print(f"Shape after adding positional embeddings: {x.shape}")
         x = self.dropout(x)
         x = self.blocks(x)
         x = self.norm(x)
+        print(f"VisionTransformer output shape: {x.shape}")
         return x[:, 0]  # return CLS token only
 
 class BloodMNISTImagePairDataset(Dataset):
     def __init__(self, npz_path, split='train', transform=None):
         data = np.load(npz_path)
-        self.images = data[f"{split}_images"]
-        self.labels = data[f"{split}_labels"].squeeze()
+        self.images = data[f"{split}_images"]  # Load only 3 images
+        self.labels = data[f"{split}_labels"].squeeze()  # Load only 3 labels
         self.transform = transform
 
     def __len__(self):
@@ -130,60 +133,10 @@ class BloodMNISTImagePairDataset(Dataset):
 
         img1 = transforms.ToTensor()(img)
         img2 = transforms.ToTensor()(augmented)
+        print(f"Dataset sample {idx}: Original shape {img1.shape}, Augmented shape {img2.shape}")
         return img1, img2, self.labels[idx]
 
-def info_nce_loss(logits):
-    batch_size = logits.shape[0]
-    labels = torch.arange(batch_size, device=logits.device)
-    return F.cross_entropy(logits, labels)
-
-def evaluate(model, npz_path, split, device):
-    data = np.load(npz_path)
-    images = data[f"{split}_images"]
-    labels = data[f"{split}_labels"].squeeze()
-
-    model.eval()
-    all_embeddings = []
-    all_labels = []
-
-    with torch.no_grad():
-        for i in range(0, len(images), 64):
-            batch_imgs = []
-            batch_labels = []
-            for j in range(i, min(i + 64, len(images))):
-                img = Image.fromarray((images[j] * 255).astype(np.uint8)).convert("RGB")
-                tensor = transforms.ToTensor()(img)
-                batch_imgs.append(tensor)
-                batch_labels.append(labels[j])
-
-            batch_tensor = torch.stack(batch_imgs).to(device)
-            batch_embeddings = model(batch_tensor)
-            all_embeddings.append(batch_embeddings)
-            all_labels.extend(batch_labels)
-
-    all_embeddings = torch.cat(all_embeddings, dim=0).cpu().numpy()
-    all_labels = np.array(all_labels)
-
-    class_means = []
-    for class_idx in np.unique(all_labels):
-        class_mean = all_embeddings[all_labels == class_idx].mean(axis=0)
-        class_means.append(class_mean)
-    class_means = np.stack(class_means)
-
-    logits = all_embeddings @ class_means.T
-    preds = np.argmax(logits, axis=1)
-
-    acc = accuracy_score(all_labels, preds)
-    y_true = np.eye(len(class_means))[all_labels]
-    y_score = logits
-    try:
-        auc = roc_auc_score(y_true, y_score, multi_class="ovr")
-    except ValueError:
-        auc = float('nan')
-
-    return acc, auc
-
-def train_vit_contrastive():
+def train_vit_debug():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("✅ Device:", device)
 
@@ -194,55 +147,25 @@ def train_vit_contrastive():
     ])
 
     dataset = BloodMNISTImagePairDataset("./data/bloodmnist.npz", split="train", transform=transform)
-    dataloader = DataLoader(dataset, batch_size=128, shuffle=True, num_workers=8, pin_memory=True)
+    dataloader = DataLoader(dataset, batch_size=2, shuffle=False, num_workers=0)
 
-    model_1 = VisionTransformer()
-    model_2 = VisionTransformer()
+    model = VisionTransformer()
+    model = model.to(device)
 
-    if torch.cuda.device_count() > 1:
-        model_1 = nn.DataParallel(model_1)
-        model_2 = nn.DataParallel(model_2)
+    for img1, img2, label in dataloader:
+        img1, img2 = img1.to(device), img2.to(device)
+        print(f"Input image 1 shape: {img1.shape}")
+        print(f"Input image 2 shape: {img2.shape}")
 
-    model_1 = model_1.to(device)
-    model_2 = model_2.to(device)
+        with autocast():
+            z1 = F.normalize(model(img1), dim=-1)
+            z2 = F.normalize(model(img2), dim=-1)
+            print(f"Normalized output z1 shape: {z1.shape}")
+            print(f"Normalized output z2 shape: {z2.shape}")
 
-    optimizer = optim.Adam(list(model_1.parameters()) + list(model_2.parameters()), lr=1e-4)
-    scaler = torch.amp.GradScaler()
-
-    for epoch in range(1, 41):
-        model_1.train()
-        model_2.train()
-        total_loss = 0
-
-        for img1, img2, _ in tqdm(dataloader, desc=f"Epoch {epoch}"):
-            img1, img2 = img1.to(device), img2.to(device)
-
-            optimizer.zero_grad()
-            with autocast():
-                z1 = F.normalize(model_1(img1), dim=-1)
-                z2 = F.normalize(model_2(img2), dim=-1)
-
-                logits = z1 @ z2.T * 100.0
-                loss = info_nce_loss(logits)
-
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-
-            total_loss += loss.item()
-
-        print(f"✅ Epoch {epoch} Loss: {total_loss / len(dataloader):.4f}")
-
-        # Evaluation
-        eval_model = model_1.module if isinstance(model_1, nn.DataParallel) else model_2
-        acc_train, auc_train = evaluate(eval_model, "./data/bloodmnist.npz", split="train", device=device)
-        acc_val, auc_val = evaluate(eval_model, "./data/bloodmnist.npz", split="val", device=device)
-        acc_test, auc_test = evaluate(eval_model, "./data/bloodmnist.npz", split="test", device=device)
-
-        print(f"\n📊 Results after Epoch {epoch}:")
-        print(f"Train  Accuracy: {acc_train:.4f} | AUC: {auc_train:.4f}")
-        print(f"Val    Accuracy: {acc_val:.4f} | AUC: {auc_val:.4f}")
-        print(f"Test   Accuracy: {acc_test:.4f} | AUC: {auc_test:.4f}\n")
+            logits = z1 @ z2.T * 100.0
+            print(f"Logits shape: {logits.shape}")
+            print(f"Logits: {logits}")
 
 if __name__ == "__main__":
-    train_vit_contrastive()
+    train_vit_debug()
