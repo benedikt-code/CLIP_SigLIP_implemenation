@@ -199,11 +199,11 @@ def train_vit_contrastive():
 
     model_1 = VisionTransformer()
     model_2 = VisionTransformer()
-
+    """
     if torch.cuda.device_count() > 1:
         model_1 = nn.DataParallel(model_1)
         model_2 = nn.DataParallel(model_2)
-
+    """
     model_1 = model_1.to(device)
     model_2 = model_2.to(device)
 
