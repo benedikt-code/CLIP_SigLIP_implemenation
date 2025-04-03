@@ -13,6 +13,7 @@ import math
 import os
 from torch.cuda.amp import autocast
 from sklearn.metrics import accuracy_score, roc_auc_score
+import matplotlib.pyplot as plt  # Import for plotting
 
 # Vision Transformer components
 class PatchEmbedding(nn.Module):
@@ -209,6 +210,15 @@ def train_vit_contrastive():
     optimizer = optim.Adam(list(model_1.parameters()) + list(model_2.parameters()), lr=1e-4)
     scaler = torch.amp.GradScaler()
 
+    # Lists to store metrics for plotting
+    train_losses = []
+    train_accuracies = []
+    train_aucs = []
+    val_accuracies = []
+    val_aucs = []
+    test_accuracies = []
+    test_aucs = []
+
     for epoch in range(1, 41):
         model_1.train()
         model_2.train()
@@ -221,7 +231,7 @@ def train_vit_contrastive():
             with autocast():
                 z1 = F.normalize(model_1(img1), dim=-1)
                 z2 = F.normalize(model_2(img2), dim=-1)
-                #temparatur value = 100
+                #Temp value = 100
                 logits = z1 @ z2.T * 100.0
                 loss = info_nce_loss(logits)
 
@@ -231,7 +241,9 @@ def train_vit_contrastive():
 
             total_loss += loss.item()
 
-        print(f"✅ Epoch {epoch} Loss: {total_loss / len(dataloader):.4f}")
+        avg_loss = total_loss / len(dataloader)
+        train_losses.append(avg_loss)
+        print(f"✅ Epoch {epoch} Loss: {avg_loss:.4f}")
 
         # Evaluation
         eval_model = model_1.module if isinstance(model_1, nn.DataParallel) else model_1
@@ -239,10 +251,57 @@ def train_vit_contrastive():
         acc_val, auc_val = evaluate(eval_model, "./data/bloodmnist.npz", split="val", device=device)
         acc_test, auc_test = evaluate(eval_model, "./data/bloodmnist.npz", split="test", device=device)
 
+        train_accuracies.append(acc_train)
+        train_aucs.append(auc_train)
+        val_accuracies.append(acc_val)
+        val_aucs.append(auc_val)
+        test_accuracies.append(acc_test)
+        test_aucs.append(auc_test)
+
         print(f"\n📊 Results after Epoch {epoch}:")
         print(f"Train  Accuracy: {acc_train:.4f} | AUC: {auc_train:.4f}")
         print(f"Val    Accuracy: {acc_val:.4f} | AUC: {auc_val:.4f}")
         print(f"Test   Accuracy: {acc_test:.4f} | AUC: {auc_test:.4f}\n")
+
+    # Save the model parameters
+    torch.save(model_1.state_dict(), "vit_model_1.pth")
+    torch.save(model_2.state_dict(), "vit_model_2.pth")
+    print("💾 Model parameters saved as 'vit_model_1.pth' and 'vit_model_2.pth'")
+
+    # Plot and save metrics
+    plt.figure(figsize=(12, 8))
+
+    # Plot Loss
+    plt.subplot(3, 1, 1)
+    plt.plot(range(1, 41), train_losses, label="Train Loss", color="blue")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("Training Loss")
+    plt.legend()
+
+    # Plot Accuracy
+    plt.subplot(3, 1, 2)
+    plt.plot(range(1, 41), train_accuracies, label="Train Accuracy", color="green")
+    plt.plot(range(1, 41), val_accuracies, label="Validation Accuracy", color="orange")
+    plt.plot(range(1, 41), test_accuracies, label="Test Accuracy", color="red")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("Accuracy")
+    plt.legend()
+
+    # Plot AUC
+    plt.subplot(3, 1, 3)
+    plt.plot(range(1, 41), train_aucs, label="Train AUC", color="green")
+    plt.plot(range(1, 41), val_aucs, label="Validation AUC", color="orange")
+    plt.plot(range(1, 41), test_aucs, label="Test AUC", color="red")
+    plt.xlabel("Epoch")
+    plt.ylabel("AUC")
+    plt.title("AUC")
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig("training_metrics.png")
+    print("📊 Training metrics plot saved as 'training_metrics.png'")
 
 if __name__ == "__main__":
     train_vit_contrastive()
