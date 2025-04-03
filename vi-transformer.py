@@ -188,7 +188,7 @@ def train_vit_contrastive():
     model_2 = model_2.to(device)
 
     optimizer = optim.Adam(list(model_1.parameters()) + list(model_2.parameters()), lr=1e-4)
-    scaler = GradScaler()
+    scaler = torch.amp.GradScaler()
 
     for epoch in range(1, 41):
         model_1.train()
@@ -215,7 +215,7 @@ def train_vit_contrastive():
         print(f"✅ Epoch {epoch} Loss: {total_loss / len(dataloader):.4f}")
 
         # Evaluation
-        eval_model = model_1.module if isinstance(model_1, nn.DataParallel) else model_1
+        eval_model = model_1.module if isinstance(model_1, nn.DataParallel) else model_2
         acc_train, auc_train = evaluate(eval_model, "./data/bloodmnist.npz", split="train", device=device)
         acc_val, auc_val = evaluate(eval_model, "./data/bloodmnist.npz", split="val", device=device)
         acc_test, auc_test = evaluate(eval_model, "./data/bloodmnist.npz", split="test", device=device)
