@@ -26,25 +26,25 @@ class PatchEmbedding(nn.Module):
         self.proj = nn.Linear(patch_size * patch_size * in_channels, embed_dim)
 
     def forward(self, x):
-        print(f"PatchEmbedding input shape: {x.shape}")  # (B, C, H, W)
+        #print(f"PatchEmbedding input shape: {x.shape}")  # (B, C, H, W)
         # Step 1: Split image into patches
         B, C, H, W = x.shape
         assert H % self.patch_size == 0 and W % self.patch_size == 0, \
             "Image size must be divisible by the patch size."
         patches = x.unfold(2, self.patch_size, self.patch_size).unfold(3, self.patch_size, self.patch_size)
-        print(f"Shape after unfolding into patches: {patches.shape}")  # (B, C, n_patches_h, n_patches_w, patch_size, patch_size)
+        #print(f"Shape after unfolding into patches: {patches.shape}")  # (B, C, n_patches_h, n_patches_w, patch_size, patch_size)
 
         # Step 2: Flatten patches
         patches = patches.contiguous().view(B, C, -1, self.patch_size * self.patch_size)
-        print(f"Shape after flattening patches: {patches.shape}")  # (B, C, n_patches, patch_size * patch_size)
+        #print(f"Shape after flattening patches: {patches.shape}")  # (B, C, n_patches, patch_size * patch_size)
 
         # Step 3: Merge channels
         patches = patches.permute(0, 2, 1, 3).contiguous().view(B, -1, C * self.patch_size * self.patch_size)
-        print(f"Shape after merging channels: {patches.shape}")  # (B, n_patches, patch_size * patch_size * C)
+        #print(f"Shape after merging channels: {patches.shape}")  # (B, n_patches, patch_size * patch_size * C)
 
         # Step 4: Linear projection
         x = self.proj(patches)
-        print(f"PatchEmbedding output shape after linear projection: {x.shape}")  # (B, n_patches, embed_dim)
+        #print(f"PatchEmbedding output shape after linear projection: {x.shape}")  # (B, n_patches, embed_dim)
         return x
 
 class MultiHeadSelfAttention(nn.Module):
@@ -221,7 +221,7 @@ def train_vit_contrastive():
             with autocast():
                 z1 = F.normalize(model_1(img1), dim=-1)
                 z2 = F.normalize(model_2(img2), dim=-1)
-
+                #temparatur value = 100
                 logits = z1 @ z2.T * 100.0
                 loss = info_nce_loss(logits)
 
@@ -234,7 +234,7 @@ def train_vit_contrastive():
         print(f"✅ Epoch {epoch} Loss: {total_loss / len(dataloader):.4f}")
 
         # Evaluation
-        eval_model = model_1.module if isinstance(model_1, nn.DataParallel) else model_2
+        eval_model = model_1.module if isinstance(model_1, nn.DataParallel) else model_1
         acc_train, auc_train = evaluate(eval_model, "./data/bloodmnist.npz", split="train", device=device)
         acc_val, auc_val = evaluate(eval_model, "./data/bloodmnist.npz", split="val", device=device)
         acc_test, auc_test = evaluate(eval_model, "./data/bloodmnist.npz", split="test", device=device)
