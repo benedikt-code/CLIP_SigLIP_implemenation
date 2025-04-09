@@ -13,9 +13,11 @@ import math
 import os
 from torch.cuda.amp import autocast
 from sklearn.metrics import accuracy_score, roc_auc_score
-import matplotlib.pyplot as plt  # Import for plotting
+import matplotlib.pyplot as plt
 
 # Vision Transformer components
+# Does all the patching - splitting the image into patches and projecting them
+# --> using a linear layer (Conv2d would be an option too)
 class PatchEmbedding(nn.Module):
     def __init__(self, img_size=28, patch_size=7, in_channels=3, embed_dim=128):
         super().__init__()
@@ -28,6 +30,7 @@ class PatchEmbedding(nn.Module):
 
     def forward(self, x):
         #print(f"PatchEmbedding input shape: {x.shape}")  # (B, C, H, W)
+
         # Step 1: Split image into patches
         B, C, H, W = x.shape
         assert H % self.patch_size == 0 and W % self.patch_size == 0, \
@@ -55,15 +58,20 @@ class MultiHeadSelfAttention(nn.Module):
         self.head_dim = embed_dim // num_heads
         assert embed_dim % num_heads == 0
 
+        #qkv values
         self.qkv = nn.Linear(embed_dim, embed_dim * 3)
         self.out_proj = nn.Linear(embed_dim, embed_dim)
 
     def forward(self, x):
+        #Variables B = batch size, N = number of patches, C = embedding dimension
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)
+        #qkv is split
         q, k, v = qkv[0], qkv[1], qkv[2]
-
+        
+        #attention scores are calculated by multiplying q and k, then softmax is applied to get attention probabilities
+        #and finally the attention probabilities are multiplied with v to get the final output
         attn_scores = (q @ k.transpose(-2, -1)) / math.sqrt(self.head_dim)
         attn_probs = attn_scores.softmax(dim=-1)
         attn_output = (attn_probs @ v).transpose(1, 2).reshape(B, N, C)
@@ -96,6 +104,8 @@ class VisionTransformer(nn.Module):
         self.pos_embed = nn.Parameter(torch.zeros(1, 1 + self.patch_embed.n_patches, embed_dim))
         self.dropout = nn.Dropout(0.1)
 
+        #Transformer blocks, each block consists of a multi-head self-attention layer and a feedforward neural network
+        # --> each block is followed by a layer normalization
         self.blocks = nn.Sequential(*[
             TransformerEncoderBlock(embed_dim, num_heads, mlp_dim)
             for _ in range(depth)
@@ -103,6 +113,8 @@ class VisionTransformer(nn.Module):
 
         self.norm = nn.LayerNorm(embed_dim)
 
+    #Does the forward pass of the model
+    # --> input is an image, output is the embedding of the CLS token    
     def forward(self, x):
         B = x.size(0)
         x = self.patch_embed(x)
@@ -114,6 +126,8 @@ class VisionTransformer(nn.Module):
         x = self.norm(x)
         return x[:, 0]  # return CLS token only
 
+#Loads Bloodmnist dataset from npz file and applies transformations
+# --> returns two augmented images and the label
 class BloodMNISTImagePairDataset(Dataset):
     def __init__(self, npz_path, split='train', transform=None):
         data = np.load(npz_path)
