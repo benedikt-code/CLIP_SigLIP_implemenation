@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
+from torch.cuda.amp import GradScaler, autocast
 from torchvision import transforms
 from PIL import Image
 import numpy as np
@@ -208,7 +209,7 @@ def train_vit_contrastive():
     model_2 = model_2.to(device)
 
     optimizer = optim.Adam(list(model_1.parameters()) + list(model_2.parameters()), lr=1e-4)
-    scaler = torch.amp.GradScaler()
+    scaler = GradScaler()
 
     # Lists to store metrics for plotting
     train_losses = []
